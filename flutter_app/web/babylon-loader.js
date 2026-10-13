@@ -1,201 +1,212 @@
 (function () {
+  const target = document.getElementById('threejs-canvas');
+  if (!target || !window.BABYLON) return;
+
+  const engine = new BABYLON.Engine(target, true, { preserveDrawingBuffer: true, stencil: true });
   const scene = new BABYLON.Scene(engine);
-  scene.clearColor = new BABYLON.Color4(0.49, 0.79, 1.0, 1.0);
+  scene.clearColor = new BABYLON.Color4(0.48, 0.78, 1.0, 1.0);
   scene.fogMode = BABYLON.Scene.FOGMODE_LINEAR;
-  scene.fogColor = new BABYLON.Color3(0.5, 0.8, 1.0);
+  scene.fogColor = new BABYLON.Color3(0.48, 0.78, 1.0);
   scene.fogStart = 25;
   scene.fogEnd = 120;
 
-  const camera = new BABYLON.ArcRotateCamera(
-    'camera',
-    -Math.PI / 2,
-    Math.PI / 3,
-    18,
-    new BABYLON.Vector3(0, 2, 0),
-    scene
-  );
-  camera.attachControl(canvas, true);
+  const camera = new BABYLON.ArcRotateCamera('camera', -Math.PI / 2, 1.2, 20, new BABYLON.Vector3(0, 2, 0), scene);
+  camera.attachControl(target, true);
   camera.lowerRadiusLimit = 8;
   camera.upperRadiusLimit = 40;
 
-  const light = new BABYLON.HemisphericLight('hLight', new BABYLON.Vector3(0, 1, 0), scene);
-  light.intensity = 1.2;
+  const hemi = new BABYLON.HemisphericLight('hemi', new BABYLON.Vector3(0, 1, 0), scene);
+  hemi.intensity = 1.2;
 
-  const sun = new BABYLON.DirectionalLight('sun', new BABYLON.Vector3(-5, 10, -2), scene);
-  sun.intensity = 0.7;
+  const sun = new BABYLON.DirectionalLight('sun', new BABYLON.Vector3(-10, 20, -5), scene);
+  sun.intensity = 0.75;
 
   const ground = BABYLON.MeshBuilder.CreateGround('ground', { width: 140, height: 140 }, scene);
-  ground.material = new BABYLON.StandardMaterial('groundMat', scene);
-  ground.material.diffuseColor = new BABYLON.Color3(0.42, 0.77, 0.38);
+  const groundMat = new BABYLON.StandardMaterial('groundMat', scene);
+  groundMat.diffuseColor = new BABYLON.Color3(0.42, 0.75, 0.38);
+  ground.material = groundMat;
 
-  const grid = BABYLON.MeshBuilder.CreateGround('grid', { width: 100, height: 100, subdivisions: 20 }, scene);
+  const road = BABYLON.MeshBuilder.CreateGround('road', { width: 18, height: 140 }, scene);
+  road.position = new BABYLON.Vector3(0, 0.03, 0);
+  road.rotation.y = Math.PI / 2;
+  road.material = new BABYLON.StandardMaterial('roadMat', scene);
+  road.material.diffuseColor = new BABYLON.Color3(0.4, 0.4, 0.42);
+
+  const worldBounds = 56;
+  const grid = BABYLON.MeshBuilder.CreateGround('grid', { width: 120, height: 120, subdivisions: 30 }, scene);
   grid.position.y = 0.02;
-  grid.material = new BABYLON.StandardMaterial('gridMat', scene);
-  grid.material.wireframe = true;
-  grid.material.alpha = 0.3;
+  const gridMat = new BABYLON.StandardMaterial('gridMat', scene);
+  gridMat.wireframe = true;
+  gridMat.alpha = 0.2;
+  grid.material = gridMat;
 
-  const houses = [];
-  const enterables = new Map();
+  const world = new BABYLON.TransformNode('world');
 
   function buildVilla(id, x, z, options = {}) {
-    const villa = new BABYLON.TransformNode(`${id}-root`);
-    villa.position = new BABYLON.Vector3(x, 0, z);
+    const root = new BABYLON.TransformNode(`${id}-root`);
+    root.position = new BABYLON.Vector3(x, 0, z);
+    root.parent = world;
 
     const floors = options.floors || 3;
     const footprint = options.footprint || { w: 9, d: 7 };
-    const wallColor = new BABYLON.Color3(1, 1, 1);
-    const floorColor = new BABYLON.Color3(0.96, 0.95, 0.92);
-    const glassColor = new BABYLON.Color3(0.55, 0.9, 1.0);
-
-    const shell = new BABYLON.TransformNode(`${id}-shell`);
-    shell.parent = villa;
-
-    for (let f = 0; f < floors; f++) {
-      const floorY = 0.8 + (f * 2.8);
-      const floorPlate = BABYLON.MeshBuilder.CreateBox(`${id}-floor-${f}`, { width: footprint.w, height: 0.12, depth: footprint.d }, scene);
-      floorPlate.position = new BABYLON.Vector3(0, floorY, 0);
-      floorPlate.parent = shell;
-      floorPlate.material = new BABYLON.StandardMaterial(`${id}-floorMat-${f}`, scene);
-      floorPlate.material.diffuseColor = floorColor;
-
-      const wallMat = new BABYLON.StandardMaterial(`${id}-wallMat-${f}`, scene);
-      wallMat.diffuseColor = wallColor;
-
-      const north = BABYLON.MeshBuilder.CreateBox(`${id}-wallN-${f}`, { width: footprint.w, height: 2.4, depth: 0.2 }, scene);
-      north.position = new BABYLON.Vector3(0, floorY + 1.1, -footprint.d / 2 + 0.1);
-      north.parent = shell;
-      north.material = wallMat;
-
-      const south = north.clone(`${id}-wallS-${f}`);
-      south.position.z = footprint.d / 2 - 0.1;
-      south.parent = shell;
-
-      const east = BABYLON.MeshBuilder.CreateBox(`${id}-wallE-${f}`, { width: 0.2, height: 2.4, depth: footprint.d }, scene);
-      east.position = new BABYLON.Vector3(footprint.w / 2 - 0.1, floorY + 1.1, 0);
-      east.parent = shell;
-      east.material = wallMat;
-
-      const west = east.clone(`${id}-wallW-${f}`);
-      west.position.x = -footprint.w / 2 + 0.1;
-      west.parent = shell;
-    }
-
-    const door = BABYLON.MeshBuilder.CreateBox(`${id}-door`, { width: 1.2, height: 2.2, depth: 0.12 }, scene);
-    door.position = new BABYLON.Vector3(0, 1.1, footprint.d / 2 + 0.06);
-    door.parent = villa;
-    door.material = new BABYLON.StandardMaterial(`${id}-doorMat`, scene);
-    door.material.diffuseColor = new BABYLON.Color3(0.4, 0.2, 0.15);
-
     const interiorRoot = new BABYLON.TransformNode(`${id}-interior`);
-    interiorRoot.parent = villa;
+    interiorRoot.parent = root;
     interiorRoot.position = new BABYLON.Vector3(0, 0, 0);
     interiorRoot.setEnabled(false);
 
-    const elevator = new BABYLON.TransformNode(`${id}-elevator`);
-    elevator.parent = interiorRoot;
-    const cabin = BABYLON.MeshBuilder.CreateBox(`${id}-cabin`, { width: 1.3, height: 2, depth: 1.3 }, scene);
-    cabin.position = new BABYLON.Vector3(-2.9, 1.0, 0);
-    cabin.parent = elevator;
-    cabin.material = new BABYLON.StandardMaterial(`${id}-cabinMat`, scene);
-    cabin.material.diffuseColor = new BABYLON.Color3(0.5, 0.5, 0.55);
-    cabin.metadata = { isElevatorCabin: true };
+    const shell = new BABYLON.TransformNode(`${id}-shell`);
+    shell.parent = root;
 
-    const shaft = BABYLON.MeshBuilder.CreateBox(`${id}-shaft`, { width: 1.5, height: floors * 2.8 + 1.2, depth: 1.5 }, scene);
-    shaft.position = new BABYLON.Vector3(-2.9, (floors * 2.8) / 2, 0);
-    shaft.parent = interiorRoot;
-    shaft.material = new BABYLON.StandardMaterial(`${id}-shaftMat`, scene);
-    shaft.material.alpha = 0.25;
-    shaft.material.diffuseColor = new BABYLON.Color3(0.2, 0.2, 0.2);
+    const wallMat = new BABYLON.StandardMaterial(`${id}-wallMat`, scene);
+    wallMat.diffuseColor = new BABYLON.Color3(1, 1, 1);
 
-    // Simple interior floors and furniture
     for (let f = 0; f < floors; f++) {
-      const floorY = f * 2.8;
-      const floor = BABYLON.MeshBuilder.CreateBox(`${id}-roomFloor-${f}`, { width: 6.5, height: 0.12, depth: 5.6 }, scene);
-      floor.position = new BABYLON.Vector3(0, floorY + 0.06, 0);
-      floor.parent = interiorRoot;
-      floor.material = new BABYLON.StandardMaterial(`${id}-roomFloorMat-${f}`, scene);
-      floor.material.diffuseColor = new BABYLON.Color3(0.95, 0.94, 0.9);
+      const floorY = 0.8 + (f * 2.8);
+      const floor = BABYLON.MeshBuilder.CreateBox(`${id}-floor-${f}`, { width: footprint.w, height: 0.12, depth: footprint.d }, scene);
+      floor.position = new BABYLON.Vector3(0, floorY, 0);
+      floor.parent = shell;
+      const floorMat = new BABYLON.StandardMaterial(`${id}-floorMat-${f}`, scene);
+      floorMat.diffuseColor = new BABYLON.Color3(0.96, 0.94, 0.9);
+      floor.material = floorMat;
 
-      const sofa = BABYLON.MeshBuilder.CreateBox(`${id}-sofa-${f}`, { width: 2.0, height: 0.5, depth: 0.9 }, scene);
-      sofa.position = new BABYLON.Vector3(2, floorY + 0.3, -1.4);
-      sofa.parent = interiorRoot;
-      sofa.material = new BABYLON.StandardMaterial(`${id}-sofaMat-${f}`, scene);
-      sofa.material.diffuseColor = new BABYLON.Color3(0.2, 0.45, 0.55);
+      const north = BABYLON.MeshBuilder.CreateBox(`${id}-north-${f}`, { width: footprint.w, height: 2.3, depth: 0.16 }, scene);
+      north.position = new BABYLON.Vector3(0, floorY + 1.2, -footprint.d / 2 + 0.08);
+      north.parent = shell; north.material = wallMat;
+      const south = north.clone(`${id}-south-${f}`); south.position.z = footprint.d / 2 - 0.08;
+      south.parent = shell;
+      const east = BABYLON.MeshBuilder.CreateBox(`${id}-east-${f}`, { width: 0.16, height: 2.3, depth: footprint.d }, scene);
+      east.position = new BABYLON.Vector3(footprint.w / 2 - 0.08, floorY + 1.2, 0);
+      east.parent = shell; east.material = wallMat;
+      const west = east.clone(`${id}-west-${f}`); west.position.x = -footprint.w / 2 + 0.08; west.parent = shell;
+
+      const glass = BABYLON.MeshBuilder.CreateBox(`${id}-glass-${f}`, { width: 1.6, height: 1.2, depth: 0.08 }, scene);
+      glass.position = new BABYLON.Vector3(0, floorY + 1.6, -footprint.d / 2 + 0.12);
+      glass.parent = shell;
+      const glassMat = new BABYLON.StandardMaterial(`${id}-glassMat-${f}`, scene);
+      glassMat.diffuseColor = new BABYLON.Color3(0.5, 0.84, 1.0);
+      glassMat.alpha = 0.8;
+      glass.material = glassMat;
     }
 
-    const entry = { id, villa, shell, interiorRoot, door, elevator, currentFloor: 0, targetFloor: 0 };
-    enterables.set(id, entry);
-    houses.push(entry);
+    const roof = BABYLON.MeshBuilder.CreateBox(`${id}-roof`, { width: footprint.w + 0.8, height: 0.2, depth: footprint.d + 0.8 }, scene);
+    roof.position = new BABYLON.Vector3(0, floors * 2.8 + 1.0, 0);
+    roof.parent = shell;
+    roof.material = new BABYLON.StandardMaterial(`${id}-roofMat`, scene);
+    roof.material.diffuseColor = new BABYLON.Color3(0.9, 0.85, 0.7);
+
+    const door = BABYLON.MeshBuilder.CreateBox(`${id}-door`, { width: 1.2, height: 2.2, depth: 0.12 }, scene);
+    door.position = new BABYLON.Vector3(0, 1.1, footprint.d / 2 + 0.08);
+    door.parent = root;
+    door.material = new BABYLON.StandardMaterial(`${id}-doorMat`, scene);
+    door.material.diffuseColor = new BABYLON.Color3(0.35, 0.22, 0.18);
+
+    // interior setup: room + elevator + furniture
+    const elevatorShaft = BABYLON.MeshBuilder.CreateBox(`${id}-shaft`, { width: 1.8, height: floors * 2.8 + 1.4, depth: 1.8 }, scene);
+    elevatorShaft.position = new BABYLON.Vector3(-3.1, (floors * 2.8 + 1.4) / 2 - 0.6, 0);
+    elevatorShaft.parent = interiorRoot;
+    const shaftMat = new BABYLON.StandardMaterial(`${id}-shaftMat`, scene);
+    shaftMat.alpha = 0.22; shaftMat.diffuseColor = new BABYLON.Color3(0.15, 0.15, 0.16);
+    elevatorShaft.material = shaftMat;
+
+    const lift = new BABYLON.TransformNode(`${id}-lift`);
+    lift.parent = interiorRoot;
+    lift.position = new BABYLON.Vector3(-3.1, 0, 0);
+    lift.rotation = new BABYLON.Vector3(0, 0, 0);
+
+    const cabin = BABYLON.MeshBuilder.CreateBox(`${id}-cabin`, { width: 1.4, height: 1.8, depth: 1.4 }, scene);
+    cabin.position = new BABYLON.Vector3(0, 1.0, 0);
+    cabin.parent = lift;
+    cabin.material = new BABYLON.StandardMaterial(`${id}-cabinMat`, scene);
+    cabin.material.diffuseColor = new BABYLON.Color3(0.55, 0.58, 0.6);
+    cabin.metadata = { isElevatorCabin: true };
+
+    // floor planes and simple furniture on floors
+    for (let f = 0; f < floors; f++) {
+      const floorY = f * 2.8;
+      const roomFloor = BABYLON.MeshBuilder.CreateBox(`${id}-roomFloor-${f}`, { width: 6.2, height: 0.08, depth: 5.4 }, scene);
+      roomFloor.position = new BABYLON.Vector3(0, floorY + 0.04, 0);
+      roomFloor.parent = interiorRoot;
+      roomFloor.material = new BABYLON.StandardMaterial(`${id}-roomFloorMat-${f}`, scene);
+      roomFloor.material.diffuseColor = new BABYLON.Color3(0.93, 0.91, 0.85);
+
+      const sofa = BABYLON.MeshBuilder.CreateBox(`${id}-sofa-${f}`, { width: 2.5, height: 0.5, depth: 0.9 }, scene);
+      sofa.position = new BABYLON.Vector3(1.8, floorY + 0.3, -1.2);
+      sofa.parent = interiorRoot;
+      sofa.material = new BABYLON.StandardMaterial(`${id}-sofaMat-${f}`, scene);
+      sofa.material.diffuseColor = new BABYLON.Color3(0.15, 0.32, 0.4);
+
+      const table = BABYLON.MeshBuilder.CreateBox(`${id}-table-${f}`, { width: 1, height: 0.5, depth: 1 }, scene);
+      table.position = new BABYLON.Vector3(-1.2, floorY + 0.22, 0.8);
+      table.parent = interiorRoot;
+      table.material = new BABYLON.StandardMaterial(`${id}-tableMat-${f}`, scene);
+      table.material.diffuseColor = new BABYLON.Color3(0.52, 0.38, 0.28);
+    }
+
+    const entry = {
+      id,
+      root,
+      shell,
+      interiorRoot,
+      door,
+      lift,
+      targetFloor: 0,
+      currentFloor: 0,
+    };
+    shell.setEnabled(true);
+    interiorRoot.setEnabled(false);
     return entry;
   }
 
-  buildVilla('villa-1', -18, -12, { floors: 3, name: 'Seaside Villa' });
-  buildVilla('villa-2', 18, -10, { floors: 4, name: 'Sky Villa' });
+  const villas = [
+    buildVilla('villa-1', -18, -12, { floors: 3 }),
+    buildVilla('villa-2', 18, -10, { floors: 4 }),
+  ];
 
-  // quick UI overlay for elevator and prompt
-  const ui = document.createElement('div');
-  ui.style.position = 'fixed';
-  ui.style.left = '20px';
-  ui.style.top = '20px';
-  ui.style.background = 'rgba(12, 18, 28, 0.7)';
-  ui.style.padding = '10px 14px';
-  ui.style.borderRadius = '12px';
-  ui.style.color = '#fff';
-  ui.style.fontFamily = 'sans-serif';
-  ui.style.border = '1px solid rgba(255,255,255,0.12)';
-  ui.style.zIndex = '10';
-  ui.textContent = 'Click a villa door to enter';
-  document.body.appendChild(ui);
+  const player = BABYLON.MeshBuilder.CreateCapsule('player', { radius: 0.55, height: 1.8, capSubdivisions: 8 }, scene);
+  player.position = new BABYLON.Vector3(0, 1.1, 5);
+  player.material = new BABYLON.StandardMaterial('playerMat', scene);
+  player.material.diffuseColor = new BABYLON.Color3(0.3, 0.7, 1.0);
 
-  const toast = document.createElement('div');
-  toast.style.position = 'fixed';
-  toast.style.left = '50%';
-  toast.style.top = '12%';
-  toast.style.transform = 'translateX(-50%)';
-  toast.style.background = 'rgba(0,0,0,0.72)';
-  toast.style.color = 'white';
-  toast.style.padding = '8px 12px';
-  toast.style.borderRadius = '10px';
-  toast.style.opacity = '0';
-  toast.style.transition = 'opacity 0.2s';
-  toast.style.zIndex = '11';
-  document.body.appendChild(toast);
+  const keys = {};
+  let activeEnterable = null;
+  let panel = null;
 
-  function showToast(msg) {
-    toast.textContent = msg;
-    toast.style.opacity = '1';
-    clearTimeout(showToast.timer);
-    showToast.timer = setTimeout(() => { toast.style.opacity = '0'; }, 1500);
+  function toast(message) {
+    const el = document.getElementById('toast-message');
+    if (!el) return;
+    el.textContent = message;
+    el.style.opacity = '1';
+    clearTimeout(toast.timer);
+    toast.timer = setTimeout(() => { el.style.opacity = '0'; }, 1800);
   }
 
-  // current interior state
-  let activeInteriorId = null;
-  let activeElevatorPanel = null;
-
-  function hideElevatorPanel() {
-    if (activeElevatorPanel) {
-      activeElevatorPanel.remove();
-      activeElevatorPanel = null;
+  function hidePanel() {
+    if (panel) {
+      panel.remove();
+      panel = null;
     }
   }
 
-  function showElevatorPanel(entry) {
-    hideElevatorPanel();
-    const panel = document.createElement('div');
+  function showPanel(entry) {
+    hidePanel();
+    panel = document.createElement('div');
     panel.style.position = 'fixed';
-    panel.style.right = '18px';
-    panel.style.bottom = '18px';
+    panel.style.right = '20px';
+    panel.style.bottom = '20px';
     panel.style.background = 'rgba(0,0,0,0.58)';
-    panel.style.padding = '10px';
     panel.style.borderRadius = '12px';
-    panel.style.color = '#fff';
-    panel.style.zIndex = '11';
+    panel.style.padding = '12px';
+    panel.style.color = 'white';
+    panel.style.zIndex = '100';
+    panel.style.fontFamily = 'sans-serif';
 
     const title = document.createElement('div');
-    title.textContent = 'Elevator'; title.style.marginBottom = '8px'; title.style.fontWeight = '700';
+    title.textContent = 'Elevator';
+    title.style.fontWeight = '700';
+    title.style.marginBottom = '8px';
     panel.appendChild(title);
 
-    for (let floor = 0; floor < 3; floor++) {
+    for (let floor = 0; floor < 4; floor++) {
       const btn = document.createElement('button');
       btn.textContent = `Floor ${floor + 1}`;
       btn.style.display = 'block';
@@ -203,89 +214,91 @@
       btn.style.margin = '6px 0';
       btn.onclick = () => {
         entry.targetFloor = floor;
-        showToast(`Elevator moving to floor ${floor + 1}`);
+        toast(`Elevator moving to floor ${floor + 1}`);
       };
       panel.appendChild(btn);
     }
 
     const exitBtn = document.createElement('button');
     exitBtn.textContent = 'Exit Villa';
-    exitBtn.style.display = 'block';
-    exitBtn.style.width = '100%';
     exitBtn.style.marginTop = '8px';
-    exitBtn.onclick = () => {
-      exitInterior();
-    };
+    exitBtn.style.width = '100%';
+    exitBtn.onclick = () => exitInterior();
     panel.appendChild(exitBtn);
 
-    activeElevatorPanel = panel;
     document.body.appendChild(panel);
   }
 
   function enterInterior(entry) {
-    for (const e of enterables.values()) {
-      e.interiorRoot.setEnabled(false);
-      e.shell.setEnabled(true);
+    for (const v of villas) {
+      v.shell.setEnabled(true);
+      v.interiorRoot.setEnabled(false);
     }
-    entry.interiorRoot.setEnabled(true);
     entry.shell.setEnabled(false);
-    activeInteriorId = entry.id;
-    player.position = new BABYLON.Vector3(entry.villa.position.x + 1, 1.1, entry.villa.position.z + 3.4);
-    showElevatorPanel(entry);
-    showToast('Entered villa interior');
+    entry.interiorRoot.setEnabled(true);
+    activeEnterable = entry;
+    player.position = new BABYLON.Vector3(entry.root.position.x + 1.5, 1.1, entry.root.position.z + 2.5);
+    showPanel(entry);
+    toast('Entered villa');
   }
 
   function exitInterior() {
-    if (!activeInteriorId) return;
-    const entry = enterables.get(activeInteriorId);
-    if (!entry) return;
+    if (!activeEnterable) return;
+    const entry = activeEnterable;
     entry.interiorRoot.setEnabled(false);
     entry.shell.setEnabled(true);
-    player.position = new BABYLON.Vector3(entry.villa.position.x, 1.1, entry.villa.position.z + 7);
-    activeInteriorId = null;
-    hideElevatorPanel();
-    showToast('Exited villa');
+    player.position = new BABYLON.Vector3(entry.root.position.x, 1.1, entry.root.position.z + 7);
+    activeEnterable = null;
+    hidePanel();
+    toast('Exited villa');
   }
 
-  const player = BABYLON.MeshBuilder.CreateCapsule('player', { radius: 0.6, height: 1.8, capSubdivisions: 8 }, scene);
-  player.position = new BABYLON.Vector3(0, 1.1, 0);
-  player.material = new BABYLON.StandardMaterial('playerMat', scene);
-  player.material.diffuseColor = new BABYLON.Color3(0.35, 0.75, 1.0);
+  function findVillaFromMesh(mesh) {
+    for (const entry of villas) {
+      if (entry.door === mesh || entry.door === mesh.parent) return entry;
+    }
+    return null;
+  }
 
-  // movement keys
-  const keys = {};
+  const toastEl = document.createElement('div');
+  toastEl.id = 'toast-message';
+  toastEl.style.position = 'fixed';
+  toastEl.style.left = '50%';
+  toastEl.style.top = '10%';
+  toastEl.style.transform = 'translateX(-50%)';
+  toastEl.style.background = 'rgba(0,0,0,0.7)';
+  toastEl.style.color = 'white';
+  toastEl.style.padding = '8px 12px';
+  toastEl.style.borderRadius = '10px';
+  toastEl.style.opacity = '0';
+  toastEl.style.transition = 'opacity 0.2s';
+  toastEl.style.zIndex = '101';
+  document.body.appendChild(toastEl);
+
+  target.addEventListener('pointerdown', (evt) => {
+    const pick = scene.pick(evt.clientX, evt.clientY);
+    if (!pick || !pick.hit) return;
+    const doorEntry = findVillaFromMesh(pick.pickedMesh);
+    if (doorEntry) {
+      enterInterior(doorEntry);
+      return;
+    }
+
+    if (pick.pickedPoint) {
+      player.position.x = pick.pickedPoint.x;
+      player.position.z = pick.pickedPoint.z;
+    }
+  });
+
   window.addEventListener('keydown', (event) => {
     keys[event.key.toLowerCase()] = true;
-    if (event.key === 'Escape' && activeInteriorId) exitInterior();
+    if (event.key === 'Escape' && activeEnterable) exitInterior();
   });
   window.addEventListener('keyup', (event) => {
     keys[event.key.toLowerCase()] = false;
   });
 
-  // click detect doors
-  const pointer = new BABYLON.Vector2();
-  canvas.addEventListener('pointerdown', function (evt) {
-    if (!evt) return;
-    const pick = scene.pick(evt.clientX, evt.clientY);
-    if (!pick || !pick.hit) return;
-    const mesh = pick.pickedMesh;
-    if (!mesh) return;
-    const entry = Array.from(enterables.values()).find((e) => e.door === mesh || e.door === mesh.parent || e.door === pick.pickedMesh);
-    if (entry) {
-      enterInterior(entry);
-      return;
-    }
-
-    // click on ground to move player
-    if (pick.pickedPoint) {
-      const point = pick.pickedPoint;
-      player.position.x = point.x;
-      player.position.z = point.z;
-    }
-  });
-
   const socket = new WebSocket('ws://localhost:8081');
-
   socket.addEventListener('open', () => {
     socket.send(JSON.stringify({
       type: 'join',
@@ -302,56 +315,40 @@
     }));
   });
 
-  socket.addEventListener('message', (ev) => {
-    try {
-      const data = JSON.parse(ev.data);
-      if (data.type !== 'world-state') return;
-      // remote NPC avatars are handled elsewhere in the Babylon scene if needed.
-    } catch (err) {
-      console.error('WebSocket parse error:', err);
-    }
-  });
-
-  // animations
-  const moveSpeed = 0.14;
   scene.onBeforeRenderObservable.add(() => {
     const moveX = (keys['d'] ? 1 : 0) - (keys['a'] ? 1 : 0);
     const moveZ = (keys['s'] ? 1 : 0) - (keys['w'] ? 1 : 0);
+    const moveLength = Math.hypot(moveX, moveZ) || 1;
 
     if (moveX || moveZ) {
-      const p = new BABYLON.Vector3(moveX, 0, moveZ);
-      p.normalize();
-      player.position.x += p.x * moveSpeed;
-      player.position.z += p.z * moveSpeed;
-      player.rotation.y = Math.atan2(p.x, p.z);
+      player.position.x += (moveX / moveLength) * 0.18;
+      player.position.z += (moveZ / moveLength) * 0.18;
+      player.rotation.y = Math.atan2(moveX, moveZ);
     }
 
-    // elevator motion
-    for (const entry of enterables.values()) {
-      if (!entry.elevator) continue;
-      const targetY = entry.targetFloor * 2.8;
-      const currentY = entry.elevator.position.y;
-      if (Math.abs(currentY - targetY) > 0.02) {
-        const step = 0.12;
-        entry.elevator.position.y += Math.sign(targetY - currentY) * Math.min(step, Math.abs(targetY - currentY));
+    // Elevator animation
+    for (const entry of villas) {
+      const liftTarget = entry.targetFloor * 2.8;
+      const liftCurrent = entry.lift.position.y;
+      const diff = liftTarget - liftCurrent;
+      if (Math.abs(diff) > 0.02) {
+        entry.lift.position.y += Math.sign(diff) * Math.min(0.15, Math.abs(diff));
       }
     }
 
     // camera follow
-    if (activeInteriorId) {
+    if (activeEnterable) {
       camera.target = new BABYLON.Vector3(player.position.x, 1.5, player.position.z);
       camera.radius = 8;
-      camera.beta = Math.PI / 3.4;
+      camera.beta = 1.1;
       camera.alpha = -Math.PI / 2;
-      camera.setTarget(player.position.clone());
     } else {
       camera.target = new BABYLON.Vector3(player.position.x, 1.5, player.position.z);
-      camera.radius = 14;
-      camera.beta = Math.PI / 3;
+      camera.radius = 16;
+      camera.beta = 1.15;
       camera.alpha = -Math.PI / 2;
     }
 
-    // network send
     if (socket.readyState === WebSocket.OPEN) {
       socket.send(JSON.stringify({
         type: 'move',
@@ -373,7 +370,5 @@
     scene.render();
   });
 
-  window.addEventListener('resize', () => {
-    engine.resize();
-  });
+  window.addEventListener('resize', () => engine.resize());
 })();

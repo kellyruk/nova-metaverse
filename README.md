@@ -1,60 +1,42 @@
 # Metaverse Web NPC Starter
 
-This project now includes a Babylon.js scene with a luxury villa and elevator entry flow, while retaining the WebSocket server and NPC scaling model.
+This project uses a Babylon.js web client with an enterable luxury villa scene and elevator floor controls.
 
-## Requirements
+## Local run steps
 
-- Node.js 20+
-- npm
-- Flutter SDK
-- Chrome for Flutter web preview
-- Optional: Docker + Docker Compose
-- Optional: VPS/cloud VM for Windscribe-isolated NPCs
-
-## Local run
-
-1. Start the server:
+1. Server:
 ```bash
 cd server && npm install && node src/index.js
 ```
 
-2. Start NPCs:
+2. NPC fleet:
 ```bash
 cd npc && npm install && SERVER_URL=ws://localhost:8081 NPC_COUNT=10 node src/index.js
 ```
 
-3. Start Flutter web:
-```bash
-cd flutter_app && flutter pub get && flutter run -d chrome
-```
-
-## REST API
-
-The repo also includes a lightweight REST service for session and NPC orchestration:
-
+3. REST API:
 ```bash
 cd server-rest && npm install && node index.js
 ```
 
-Example endpoints:
-- `POST /api/session`
-- `GET /api/npcs`
-- `POST /api/npcs`
-- `POST /api/npcs/:id/status`
-- `POST /api/npcs/:id/vpn`
+4. Flutter web:
+```bash
+cd flutter_app && flutter pub get && flutter run -d chrome
+```
 
-## Babylon scene notes
+## Controls
 
-The browser scene now uses Babylon.js and includes:
-- enterable luxury villas
-- multilevel interior shell
-- elevator panel to move between floors
-- click-to-enter doors
-- player movement + keyboard controls
+- Click a villa door to enter
+- Use the elevator panel to move between floors
+- Use WASD / arrow keys to move the avatar
+- Press ESC to exit the villa
+- Use the mouse to roam the camera (ArcRotate)
 
-## Windscribe note
+## Notes
 
-For Windscribe per-NPC routing, run the NPC fleet on a VPS/cloud VM and assign each process a different `SESSION_TAG` and `VPN_LOCATION`.
+- Windscribe per-NPC locations require a VPS or cloud VM, not standard shared cPanel hosting.
+- Use environment variables for Windscribe credentials — never commit them into the repo.
+- The NPC model is intentionally lightweight and extensible for more advanced building / room logic.
 
 ## License
 
