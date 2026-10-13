@@ -1,35 +1,25 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Metaverse Web</title>
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Babylon Metaverse</title>
     <style>
-      html, body {
-        margin: 0;
-        height: 100%;
-        background: #0d1724;
-        overflow: hidden;
-      }
-      #flutter-root {
-        width: 100%;
-        height: 100%;
-      }
-      #threejs-canvas {
-        width: 100%;
-        height: 100%;
-        display: block;
-      }
+      html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; }
+      #threejs-canvas { width: 100%; height: 100%; display: block; }
+      canvas { width: 100%; height: 100%; display: block; }
     </style>
   </head>
   <body>
-    <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
-    <script src="three-loader.js"></script>
+    <div id="threejs-canvas"></div>
+    <script src="https://cdn.jsdelivr.net/npm/babylonjs@7.15.0/babylon.max.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/babylonjs-loaders@7.15.0/babylonjs.loaders.min.js"></script>
+    <script src="babylon-loader.js"></script>
     <script>
-      window.addEventListener('load', function () {
+      window.addEventListener('load', () => {
         const target = document.getElementById('threejs-canvas');
-        if (target && window.initThreeApp) {
-          window.initThreeApp(target);
+        if (target && window.initBabylonApp) {
+          window.initBabylonApp(target);
         }
       });
     </script>
