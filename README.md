@@ -35,12 +35,18 @@ This project is a starter for a Flutter Web app that embeds a Three.js metaverse
    cd server && node src/index.js
    ```
 
-4. Run the NPC fleet locally (example: 10 NPCs):
+4. Run a local NPC fleet (example 50):
    ```bash
-   cd npc && NPC_COUNT=10 node src/index.js
+   SERVER_URL=ws://localhost:8081 NPC_COUNT=50 node npc/src/index.js
    ```
 
-5. Start the Flutter web app:
+5. Or run the bundled fleet script:
+   ```bash
+   chmod +x scripts/run-npc-fleet.sh
+   SERVER_URL=ws://localhost:8081 NPC_COUNT=50 ./scripts/run-npc-fleet.sh
+   ```
+
+6. Start the Flutter web app:
    ```bash
    cd flutter_app && flutter pub get && flutter run -d chrome
    ```
@@ -66,6 +72,7 @@ Example:
 export WINDSCRIBE_EMAIL=your@email.com
 export WINDSCRIBE_PASSWORD=yourpassword
 export SERVER_URL=ws://server:8081
+export NPC_COUNT=50
 ```
 
 The VPN setup must run on a VPS/cloud VM or local machine. cPanel/shared hosting generally cannot run Docker and VPN networking in the way needed for this architecture.
@@ -75,6 +82,7 @@ The VPN setup must run on a VPS/cloud VM or local machine. cPanel/shared hosting
 - `server/` — authoritative multiplayer server
 - `npc/` — headless AI NPC clients
 - `flutter_app/` — Flutter web app that embeds Three.js
+- `scripts/` — fleet launcher helpers
 - `docker-compose.yml` — launch the server and NPC workers
 - `Dockerfile.server` and `Dockerfile.npc` — container builds
 

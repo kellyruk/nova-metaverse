@@ -3,20 +3,37 @@ const { WebSocketServer } = require('ws');
 const PORT = Number(process.env.PORT || 8081);
 const server = new WebSocketServer({ port: PORT });
 const clients = new Map();
+const WORLD_BOUNDS = 24;
+
+function clamp(value, min, max) {
+  return Math.min(Math.max(value, min), max);
+}
+
+function spawnPoint() {
+  return {
+    x: (Math.random() - 0.5) * WORLD_BOUNDS * 1.8,
+    y: 0,
+    z: (Math.random() - 0.5) * WORLD_BOUNDS * 1.8,
+  };
+}
+
+function serializePlayers() {
+  return Array.from(clients.values()).map((player) => ({
+    id: player.id,
+    kind: player.kind,
+    x: Number(player.x),
+    y: Number(player.y),
+    z: Number(player.z),
+    name: player.name,
+    color: player.color,
+    heading: Number(player.heading || 0),
+  }));
+}
 
 function broadcast() {
   const payload = {
     type: 'world-state',
-    players: Array.from(clients.values()).map((player) => ({
-      id: player.id,
-      kind: player.kind,
-      x: Number(player.x),
-      y: Number(player.y),
-      z: Number(player.z),
-      name: player.name,
-      color: player.color,
-      heading: player.heading,
-    })),
+    players: serializePlayers(),
     tick: Date.now(),
   };
 
@@ -27,20 +44,22 @@ function broadcast() {
   }
 }
 
-function createPlayerFromMessage(socket, message) {
-  const base = {
+function registerPlayer(socket, message) {
+  const point = spawnPoint();
+  const player = {
     id: message.id || `player-${Math.random().toString(16).slice(2, 10)}`,
     kind: message.kind || 'user',
     name: message.name || 'Guest',
     color: message.color || '#7fe9ff',
-    x: Number(message.x || 0),
-    y: Number(message.y || 0),
-    z: Number(message.z || 0),
+    x: Number(message.x ?? point.x),
+    y: Number(message.y ?? point.y),
+    z: Number(message.z ?? point.z),
     heading: Number(message.heading || 0),
+    connectedAt: Date.now(),
   };
 
-  clients.set(socket, base);
-  socket.send(JSON.stringify({ type: 'welcome', id: base.id }));
+  clients.set(socket, player);
+  socket.send(JSON.stringify({ type: 'welcome', id: player.id, world: { bounds: WORLD_BOUNDS } }));
 }
 
 server.on('connection', (socket) => {
@@ -51,7 +70,7 @@ server.on('connection', (socket) => {
       const message = JSON.parse(raw.toString());
 
       if (message.type === 'join') {
-        createPlayerFromMessage(socket, message);
+        registerPlayer(socket, message);
         broadcast();
         return;
       }
@@ -60,10 +79,10 @@ server.on('connection', (socket) => {
         const player = clients.get(socket);
         if (!player) return;
 
-        player.x = Number(message.x || player.x);
-        player.y = Number(message.y || player.y);
-        player.z = Number(message.z || player.z);
-        player.heading = Number(message.heading || player.heading);
+        player.x = clamp(Number(message.x ?? player.x), -WORLD_BOUNDS, WORLD_BOUNDS);
+        player.y = clamp(Number(message.y ?? player.y), 0, 10);
+        player.z = clamp(Number(message.z ?? player.z), -WORLD_BOUNDS, WORLD_BOUNDS);
+        player.heading = Number(message.heading ?? player.heading ?? 0);
         broadcast();
         return;
       }
@@ -94,4 +113,4 @@ server.on('error', (error) => {
 
 setInterval(() => {
   broadcast();
-}, 50);
+}, 60);
