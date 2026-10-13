@@ -1,0 +1,28 @@
+version: "3.9"
+services:
+  server:
+    build:
+      context: .
+      dockerfile: Dockerfile.server
+    ports:
+      - "8081:8081"
+    environment:
+      PORT: 8081
+      LOG_LEVEL: info
+
+  npc:
+    build:
+      context: .
+      dockerfile: Dockerfile.npc
+    environment:
+      SERVER_URL: ws://server:8081
+      NPC_COUNT: 1
+      WINDSCRIBE_EMAIL: ${WINDSCRIBE_EMAIL:-}
+      WINDSCRIBE_PASSWORD: ${WINDSCRIBE_PASSWORD:-}
+      WINDSCRIBE_LOCATION: ${WINDSCRIBE_LOCATION:-us-east}
+    depends_on:
+      - server
+    deploy:
+      replicas: ${NPC_COUNT:-50}
+      restart_policy:
+        condition: on-failure
