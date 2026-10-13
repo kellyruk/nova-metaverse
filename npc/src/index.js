@@ -3,6 +3,8 @@ const { buildNpcBehavior } = require('./ai');
 
 const serverUrl = process.env.SERVER_URL || 'ws://localhost:8081';
 const npcCount = Number(process.env.NPC_COUNT || 1);
+const sessionTag = process.env.SESSION_TAG || 'session-default';
+const vpnLocation = process.env.VPN_LOCATION || 'local';
 
 for (let index = 0; index < npcCount; index += 1) {
   startNpc(index);
@@ -10,23 +12,26 @@ for (let index = 0; index < npcCount; index += 1) {
 
 function startNpc(index) {
   const socket = new WebSocket(serverUrl);
-  const npc = buildNpcBehavior(index);
+  const npc = buildNpcBehavior(index, sessionTag, vpnLocation);
 
   socket.on('open', () => {
     const payload = {
       type: 'join',
-      id: `npc-${index}-${Date.now()}`,
+      id: `npc-${sessionTag}-${index}-${Date.now()}`,
       kind: 'npc',
-      name: `NPC-${index}`,
+      name: `NPC-${sessionTag}-${index}`,
       color: npc.color,
       x: npc.x,
       y: npc.y,
       z: npc.z,
       heading: npc.heading,
+      sessionTag,
+      vpnLocation,
     };
+
     socket.send(JSON.stringify(payload));
 
-    setInterval(() => {
+    const interval = setInterval(() => {
       if (socket.readyState !== WebSocket.OPEN) return;
 
       const next = npc.step();
@@ -40,26 +45,18 @@ function startNpc(index) {
         y: next.y,
         z: next.z,
         heading: next.heading,
+        sessionTag,
+        vpnLocation,
       }));
-    }, 150);
-  });
+    }, 180);
 
-  socket.on('message', (raw) => {
-    try {
-      const parsed = JSON.parse(raw.toString());
-      if (parsed.type === 'pong') {
-        // no-op: keepalive acknowledgement
-      }
-    } catch (error) {
-      console.error('NPC message parse error:', error);
-    }
-  });
-
-  socket.on('close', () => {
-    console.log(`NPC ${index} disconnected`);
+    socket.on('close', () => {
+      clearInterval(interval);
+      console.log(`NPC ${sessionTag}-${index} disconnected`);
+    });
   });
 
   socket.on('error', (error) => {
-    console.error(`NPC ${index} websocket error:`, error.message);
+    console.error(`NPC ${sessionTag}-${index} websocket error:`, error.message);
   });
 }
