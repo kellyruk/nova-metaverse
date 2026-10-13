@@ -1,62 +1,51 @@
-const { WebSocket } = require('ws');
-const { buildNpcBehavior } = require('./ai');
+function buildNpcBehavior(index, sessionTag = 'session-default', vpnLocation = 'local') {
+  const state = {
+    x: (Math.random() - 0.5) * 18,
+    y: 0,
+    z: (Math.random() - 0.5) * 18,
+    heading: Math.random() * Math.PI * 2,
+    color: ['#65d6ff', '#7ef7a3', '#f9c784', '#ff9ecb'][index % 4],
+    target: {
+      x: (Math.random() - 0.5) * 28,
+      y: 0,
+      z: (Math.random() - 0.5) * 28,
+    },
+    seed: `${sessionTag}-${vpnLocation}-${index}`,
+  };
 
-const serverUrl = process.env.SERVER_URL || 'ws://localhost:8081';
-const npcCount = Number(process.env.NPC_COUNT || 1);
-const sessionTag = process.env.SESSION_TAG || 'session-default';
-const vpnLocation = process.env.VPN_LOCATION || 'local';
+  return {
+    color: state.color,
+    x: state.x,
+    y: state.y,
+    z: state.z,
+    heading: state.heading,
+    step() {
+      const dx = state.target.x - state.x;
+      const dz = state.target.z - state.z;
+      const dist = Math.hypot(dx, dz) || 1;
 
-for (let index = 0; index < npcCount; index += 1) {
-  startNpc(index);
+      let animation = 'idle';
+      if (dist > 1.6) {
+        const step = 0.38 + ((index % 5) * 0.03);
+        state.x += (dx / dist) * step;
+        state.z += (dz / dist) * step;
+        animation = 'walk';
+      } else {
+        state.target.x = (Math.random() - 0.5) * 28;
+        state.target.z = (Math.random() - 0.5) * 28;
+      }
+
+      state.heading = Math.atan2(state.target.x - state.x, state.target.z - state.z);
+
+      return {
+        x: state.x,
+        y: state.y,
+        z: state.z,
+        heading: state.heading,
+        animation,
+      };
+    },
+  };
 }
 
-function startNpc(index) {
-  const socket = new WebSocket(serverUrl);
-  const npc = buildNpcBehavior(index, sessionTag, vpnLocation);
-
-  socket.on('open', () => {
-    const payload = {
-      type: 'join',
-      id: `npc-${sessionTag}-${index}-${Date.now()}`,
-      kind: 'npc',
-      name: `NPC-${sessionTag}-${index}`,
-      color: npc.color,
-      x: npc.x,
-      y: npc.y,
-      z: npc.z,
-      heading: npc.heading,
-      sessionTag,
-      vpnLocation,
-    };
-
-    socket.send(JSON.stringify(payload));
-
-    const interval = setInterval(() => {
-      if (socket.readyState !== WebSocket.OPEN) return;
-
-      const next = npc.step();
-      socket.send(JSON.stringify({
-        type: 'move',
-        id: payload.id,
-        kind: 'npc',
-        name: payload.name,
-        color: npc.color,
-        x: next.x,
-        y: next.y,
-        z: next.z,
-        heading: next.heading,
-        sessionTag,
-        vpnLocation,
-      }));
-    }, 180);
-
-    socket.on('close', () => {
-      clearInterval(interval);
-      console.log(`NPC ${sessionTag}-${index} disconnected`);
-    });
-  });
-
-  socket.on('error', (error) => {
-    console.error(`NPC ${sessionTag}-${index} websocket error:`, error.message);
-  });
-}
+module.exports = { buildNpcBehavior };

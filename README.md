@@ -1,43 +1,64 @@
-# Metaverse Web NPC Starter
+const { WebSocket } = require('ws');
+const { buildNpcBehavior } = require('./ai');
 
-This project uses a Babylon.js web client with an enterable luxury villa scene and elevator floor controls.
+const serverUrl = process.env.SERVER_URL || 'ws://localhost:8081';
+const npcCount = Number(process.env.NPC_COUNT || 1);
+const sessionTag = process.env.SESSION_TAG || 'session-default';
+const vpnLocation = process.env.VPN_LOCATION || 'local';
 
-## Local run steps
+for (let index = 0; index < npcCount; index += 1) {
+  startNpc(index);
+}
 
-1. Server:
-```bash
-cd server && npm install && node src/index.js
-```
+function startNpc(index) {
+  const socket = new WebSocket(serverUrl);
+  const npc = buildNpcBehavior(index, sessionTag, vpnLocation);
 
-2. NPC fleet:
-```bash
-cd npc && npm install && SERVER_URL=ws://localhost:8081 NPC_COUNT=10 node src/index.js
-```
+  socket.on('open', () => {
+    const payload = {
+      type: 'join',
+      id: `npc-${sessionTag}-${index}-${Date.now()}`,
+      kind: 'npc',
+      name: `NPC-${sessionTag}-${index}`,
+      color: npc.color,
+      x: npc.x,
+      y: npc.y,
+      z: npc.z,
+      heading: npc.heading,
+      sessionTag,
+      vpnLocation,
+      animation: 'idle',
+    };
 
-3. REST API:
-```bash
-cd server-rest && npm install && node index.js
-```
+    socket.send(JSON.stringify(payload));
 
-4. Flutter web:
-```bash
-cd flutter_app && flutter pub get && flutter run -d chrome
-```
+    const interval = setInterval(() => {
+      if (socket.readyState !== WebSocket.OPEN) return;
 
-## Controls
+      const next = npc.step();
+      socket.send(JSON.stringify({
+        type: 'move',
+        id: payload.id,
+        kind: 'npc',
+        name: payload.name,
+        color: npc.color,
+        x: next.x,
+        y: next.y,
+        z: next.z,
+        heading: next.heading,
+        sessionTag,
+        vpnLocation,
+        animation: next.animation,
+      }));
+    }, 180);
 
-- Click a villa door to enter
-- Use the elevator panel to move between floors
-- Use WASD / arrow keys to move the avatar
-- Press ESC to exit the villa
-- Use the mouse to roam the camera (ArcRotate)
+    socket.on('close', () => {
+      clearInterval(interval);
+      console.log(`NPC ${sessionTag}-${index} disconnected`);
+    });
+  });
 
-## Notes
-
-- Windscribe per-NPC locations require a VPS or cloud VM, not standard shared cPanel hosting.
-- Use environment variables for Windscribe credentials — never commit them into the repo.
-- The NPC model is intentionally lightweight and extensible for more advanced building / room logic.
-
-## License
-
-MIT
+  socket.on('error', (error) => {
+    console.error(`NPC ${sessionTag}-${index} websocket error:`, error.message);
+  });
+}
