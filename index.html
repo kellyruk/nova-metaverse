@@ -1,0 +1,422 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Metaverse — Improved Avatar + 360 Orbit</title>
+<style>
+  :root{--ui-bg:rgba(12,22,30,.68);--ui-line:rgba(255,255,255,.12);--accent:#7fe9ff}
+  html,body{height:100%;margin:0;overflow:hidden;background:#8ecaf2;font-family:Inter,system-ui,Arial}
+  canvas{display:block;width:100%;height:100%}
+  /* UI */
+  #hud{position:fixed;left:14px;top:14px;z-index:40;background:var(--ui-bg);border:1px solid var(--ui-line);border-radius:12px;padding:10px 14px}
+  #quest{position:fixed;left:14px;top:84px;z-index:40;width:min(360px,calc(100vw - 28px));background:var(--ui-bg);border:1px solid var(--ui-line);border-radius:14px;padding:12px}
+  .kicker{font-size:10px;color:var(--accent);font-weight:700;letter-spacing:.14em;text-transform:uppercase}
+  #progress{height:6px;border-radius:999px;background:rgba(255,255,255,.1);overflow:hidden;margin-top:8px}
+  #bar{height:100%;width:0;background:linear-gradient(90deg,#68ebff,#8ff7c5);transition:width .22s}
+  #info{position:fixed;left:14px;bottom:14px;z-index:40;background:var(--ui-bg);border:1px solid var(--ui-line);border-radius:12px;padding:8px 12px;font-size:13px}
+  #toast{position:fixed;left:50%;top:18%;transform:translate(-50%,-10px);opacity:0;transition:.18s;padding:10px 14px;background:rgba(6,12,18,.85);color:#fff;border-radius:10px;z-index:48}
+  #toast.show{opacity:1;transform:translate(-50%,0)}
+  #zoomControls{position:fixed;right:12px;bottom:18px;z-index:45;display:flex;flex-direction:column;gap:8px}
+  .zbtn{background:var(--ui-bg);border:1px solid var(--ui-line);color:#dff;padding:8px 10px;border-radius:10px;cursor:pointer}
+  #movePad{position:fixed;left:18px;bottom:90px;width:110px;height:110px;border-radius:50%;background:rgba(7,18,28,.28);border:1px solid rgba(255,255,255,.12);z-index:45;touch-action:none}
+  #moveStick{position:absolute;left:50%;top:50%;width:42px;height:42px;border-radius:50%;transform:translate(-50%,-50%);background:linear-gradient(145deg,#a9f5ff,#48b8d9);border:1px solid rgba(255,255,255,.6);box-shadow:0 0 18px rgba(110,230,255,.28)}
+  #debug{position:fixed;right:12px;top:12px;z-index:9999;padding:8px 10px;background:rgba(0,0,0,.56);color:#fff;font-size:12px;border-radius:8px;max-width:320px}
+  @media(max-width:640px){#quest{top:74px} #movePad{left:14px;bottom:78px;width:100px;height:100px}}
+</style>
+</head>
+<body>
+  <div id="hud">Memories: <span id="count">0</span> / 3</div>
+  <div id="quest">
+    <div class="kicker">Chapter 01 · The First Signal</div>
+    <h2 style="margin:8px 0 6px">Find the three memory sparks</h2>
+    <p style="margin:6px 0 10px;color:#cfeffb">Explore the meadow, follow crystals, press E or tap Interact to collect.</p>
+    <div id="progress"><div id="bar"></div></div>
+  </div>
+  <div id="info">WASD / Arrow keys move · Click ground to walk · E to interact</div>
+  <div id="toast"></div>
+  <div id="debug">Initializing…</div>
+
+  <div id="movePad"><div id="moveStick"></div></div>
+  <div id="zoomControls">
+    <button id="zoomIn" class="zbtn">＋</button>
+    <button id="zoomOut" class="zbtn">－</button>
+    <button id="resetCam" class="zbtn">Reset</button>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
+  <script>
+  (function(){
+    const debugEl = document.getElementById('debug');
+    function debug(msg){ debugEl.textContent = msg; console.log('[dbg]', msg); }
+
+    // WebGL quick check
+    try {
+      const c = document.createElement('canvas');
+      const gl = c.getContext('webgl2') || c.getContext('webgl') || c.getContext('experimental-webgl');
+      if (!gl) throw new Error('No WebGL');
+    } catch (err) {
+      document.body.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;background:#8ecaf2;font-family:Inter;padding:24px"><div style="max-width:540px;background:rgba(255,255,255,.95);padding:22px;border-radius:12px;color:#072"><h2>No WebGL</h2><p>Please try desktop Chrome/Safari or another phone browser.</p></div></div>';
+      return;
+    }
+    debug('WebGL OK — building scene');
+
+    // Scene / renderer / camera
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x8ecaf2);
+    scene.fog = new THREE.Fog(0x8ecaf2, 25, 160);
+
+    const camera = new THREE.PerspectiveCamera(58, innerWidth/innerHeight, 0.1, 700);
+    camera.position.set(0, 4, 10);
+
+    const renderer = new THREE.WebGLRenderer({antialias:true});
+    renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+    renderer.setSize(innerWidth, innerHeight);
+    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    document.body.appendChild(renderer.domElement);
+
+    // Lights
+    const hemi = new THREE.HemisphereLight(0xeaf7ff, 0x375f33, 1.45); scene.add(hemi);
+    const sun = new THREE.DirectionalLight(0xfff4d7, 1.1); sun.position.set(-18,28,18); sun.castShadow=true;
+    sun.shadow.mapSize.set(1024,1024); scene.add(sun);
+
+    // Terrain
+    function terrainHeight(x,z){ return Math.sin(x*0.08)*0.8 + Math.cos(z*0.07)*0.7 + Math.sin((x+z)*0.05)*0.45; }
+    const groundGeo = new THREE.PlaneGeometry(240,240,160,160);
+    const pAttr = groundGeo.attributes.position;
+    for (let i=0;i<pAttr.count;i++){ const x=pAttr.getX(i), y=pAttr.getY(i); pAttr.setZ(i, terrainHeight(x,y)); }
+    groundGeo.computeVertexNormals();
+    const ground = new THREE.Mesh(groundGeo, new THREE.MeshStandardMaterial({color:0x57af47, roughness:1}));
+    ground.rotation.x = -Math.PI/2; ground.receiveShadow = true; scene.add(ground);
+
+    // Props (flowers/rocks/tufts) - reduced counts for performance
+    const props = new THREE.Group(); scene.add(props);
+    for (let i=0;i<30;i++){
+      const rock = new THREE.Mesh(new THREE.DodecahedronGeometry(0.45 + Math.random()*0.8,0), new THREE.MeshStandardMaterial({color:0x8c938f, roughness:1}));
+      const rx = (Math.random()-0.5)*160, rz = (Math.random()-0.5)*160;
+      rock.position.set(rx, terrainHeight(rx,rz)+0.3, rz); rock.rotation.set(Math.random()*2,Math.random()*2,Math.random()*2); props.add(rock);
+    }
+    for (let i=0;i<140;i++){
+      const fc = i%3===0?0xf4f5b6: i%3===1?0xffb7d4:0xc8b9ff;
+      const flower = new THREE.Mesh(new THREE.SphereGeometry(0.06,6,6), new THREE.MeshStandardMaterial({color:fc, roughness:1}));
+      const fx=(Math.random()-0.5)*140, fz = (Math.random()-0.5)*140; flower.position.set(fx, terrainHeight(fx,fz)+0.06, fz); props.add(flower);
+    }
+    for (let i=0;i<300;i++){
+      const tuft = new THREE.Mesh(new THREE.ConeGeometry(Math.random()*0.12+0.05, Math.random()*0.35+0.14, 4), new THREE.MeshStandardMaterial({color:0x2d8a3d, roughness:1}));
+      const tx=(Math.random()-0.5)*140, tz=(Math.random()-0.5)*140; tuft.position.set(tx, terrainHeight(tx,tz)+0.1, tz); tuft.rotation.y = Math.random()*Math.PI; props.add(tuft);
+    }
+
+    // Portal landmark
+    const portal = new THREE.Group();
+    const stoneMat = new THREE.MeshStandardMaterial({color:0x617984, roughness:0.8});
+    const archL = new THREE.Mesh(new THREE.BoxGeometry(0.9,5.2,0.9), stoneMat); archL.position.set(-2.2,2.6,0); portal.add(archL);
+    const archR = archL.clone(); archR.position.x = 2.2; portal.add(archR);
+    const cap = new THREE.Mesh(new THREE.BoxGeometry(5.5,0.8,0.8), stoneMat); cap.position.set(0,5.1,0); portal.add(cap);
+    const glow = new THREE.Mesh(new THREE.PlaneGeometry(4.0,4.4), new THREE.MeshBasicMaterial({color:0x64e9ff, transparent:true, opacity:0.28, side:THREE.DoubleSide})); glow.position.set(0,2.25,-0.1); portal.add(glow);
+    const ring = new THREE.Mesh(new THREE.TorusGeometry(1.7,0.08,12,40), new THREE.MeshBasicMaterial({color:0xc8ffff, transparent:true, opacity:0.9})); ring.position.set(0,2.6,0.2); ring.rotation.x = Math.PI/2; portal.add(ring);
+    portal.position.set(0,0,-30); scene.add(portal);
+
+    // PLAYER: improved primitive character + outline shell
+    const player = new THREE.Group();
+
+    const bodyMat = new THREE.MeshStandardMaterial({color:0x28a9c5, roughness:0.6, metalness:0.06, clearcoat:0.06});
+    const skinMat = new THREE.MeshStandardMaterial({color:0xd8a07a, roughness:0.9, metalness:0.02});
+    const pantsMat = new THREE.MeshStandardMaterial({color:0x243f60, roughness:0.9});
+    const shoeMat = new THREE.MeshStandardMaterial({color:0xf1f5f8, roughness:0.7});
+    const hairMat = new THREE.MeshStandardMaterial({color:0x241f1c, roughness:0.95});
+
+    const torso = new THREE.Mesh(new THREE.CapsuleGeometry(0.34,0.9,4,8), bodyMat); torso.position.y = 1.1; torso.castShadow=true; player.add(torso);
+    const belt = new THREE.Mesh(new THREE.BoxGeometry(0.72,0.14,0.42), new THREE.MeshStandardMaterial({color:0xe0b86a, roughness:0.7})); belt.position.set(0,0.7,0); player.add(belt);
+
+    // head rig with eyes and hair
+    const headRig = new THREE.Group();
+    const head = new THREE.Mesh(new THREE.SphereGeometry(0.24,20,20), skinMat); head.position.y = 1.98; head.castShadow=true;
+    headRig.add(head);
+    const hair = new THREE.Mesh(new THREE.SphereGeometry(0.255,18,16,0,Math.PI*2,0,Math.PI*0.7), hairMat); hair.position.set(0,2.08,0); headRig.add(hair);
+    const eyeMat = new THREE.MeshStandardMaterial({color:0x172b36, roughness:0.45});
+    const eyeWhite = new THREE.MeshStandardMaterial({color:0xffffff, roughness:0.9});
+    const leftEye = new THREE.Mesh(new THREE.SphereGeometry(0.044,8,8), eyeWhite); leftEye.position.set(-0.08,1.98,0.18); headRig.add(leftEye);
+    const leftPupil = new THREE.Mesh(new THREE.SphereGeometry(0.02,8,8), eyeMat); leftPupil.position.set(-0.08,1.98,0.205); headRig.add(leftPupil);
+    const rightEye = leftEye.clone(); rightEye.position.x = 0.08; headRig.add(rightEye);
+    const rightPupil = leftPupil.clone(); rightPupil.position.x = 0.08; headRig.add(rightPupil);
+    player.add(headRig);
+
+    // arms/hands
+    const leftArm = new THREE.Mesh(new THREE.CapsuleGeometry(0.1,0.55,4,6), bodyMat); leftArm.position.set(-0.48,1.18,0); leftArm.castShadow=true;
+    const rightArm = new THREE.Mesh(new THREE.CapsuleGeometry(0.1,0.55,4,6), bodyMat); rightArm.position.set(0.48,1.18,0); rightArm.castShadow=true;
+    player.add(leftArm, rightArm);
+    const leftHand = new THREE.Mesh(new THREE.SphereGeometry(0.085,10,8), skinMat); leftHand.position.set(-0.48,0.72,0); player.add(leftHand);
+    const rightHand = leftHand.clone(); rightHand.position.x = 0.48; player.add(rightHand);
+
+    // legs/boots
+    const leftLeg = new THREE.Mesh(new THREE.CapsuleGeometry(0.13,0.5,4,6), pantsMat); leftLeg.position.set(-0.15,0.38,0); leftLeg.castShadow=true;
+    const rightLeg = leftLeg.clone(); rightLeg.position.x = 0.15; player.add(leftLeg, rightLeg);
+    const leftBoot = new THREE.Mesh(new THREE.BoxGeometry(0.22,0.13,0.32), shoeMat); leftBoot.position.set(-0.15,0.05,0.06); player.add(leftBoot);
+    const rightBoot = leftBoot.clone(); rightBoot.position.x = 0.15; player.add(rightBoot);
+
+    // add player to scene
+    player.position.set(0, terrainHeight(0,8)+0.2, 8); scene.add(player);
+
+    // Outline shell (cheap cartoon outline) - clone some meshes, render BackSide black, slightly larger
+    const outlineMat = new THREE.MeshBasicMaterial({color:0x000000, side:THREE.BackSide});
+    function makeOutline(mesh){
+      const clone = mesh.clone();
+      clone.traverse(function(n){ if (n.material) n.material = outlineMat; });
+      clone.scale.multiplyScalar(1.03);
+      mesh.add(clone); // attach as child so it follows transforms
+    }
+    makeOutline(torso);
+    makeOutline(head);
+    makeOutline(leftArm);
+    makeOutline(rightArm);
+    makeOutline(leftLeg);
+    makeOutline(rightLeg);
+
+    // Memory crystals
+    const memoryColors = [0x6ff6ff,0xffd779,0xc7a0ff];
+    const memorySpots = [[4,-12],[-8,-22],[11,-33]];
+    const memories = [];
+    for (let i=0;i<memorySpots.length;i++){
+      const g = new THREE.Group();
+      const crystal = new THREE.Mesh(new THREE.OctahedronGeometry(0.62,0), new THREE.MeshStandardMaterial({color:memoryColors[i], emissive:memoryColors[i], emissiveIntensity:1.2, roughness:0.3, metalness:0.12}));
+      g.add(crystal);
+      const halo = new THREE.Mesh(new THREE.TorusGeometry(1.0,0.04,10,28), new THREE.MeshBasicMaterial({color:memoryColors[i], transparent:true, opacity:0.8}));
+      halo.rotation.x = Math.PI/2; g.add(halo);
+      const x = memorySpots[i][0], z = memorySpots[i][1];
+      g.position.set(x, terrainHeight(x,z)+1.2, z); g.userData.collected = false;
+      scene.add(g); memories.push(g);
+    }
+
+    // Camera orbit state (smooth)
+    let yaw = 0, pitch = 0.35, camDist = 6.5;
+    let yawTarget = yaw, pitchTarget = pitch, distTarget = camDist;
+    const target = new THREE.Vector3();
+
+    function updateCamera(){
+      // smooth toward targets
+      yaw += (yawTarget - yaw) * 0.12;
+      pitch += (pitchTarget - pitch) * 0.12;
+      camDist += (distTarget - camDist) * 0.12;
+
+      const cp = Math.max(-0.05, Math.min(1.2, pitch));
+      const offset = new THREE.Vector3(Math.sin(yaw)*Math.cos(cp)*camDist, Math.sin(cp)*camDist + 1.2, Math.cos(yaw)*Math.cos(cp)*camDist);
+      camera.position.copy(target).add(offset);
+      camera.lookAt(target);
+    }
+
+    // Input: keyboard + click-to-walk
+    const keys = {};
+    let autoTarget = null;
+    function toast(msg){ const t=document.getElementById('toast'); t.textContent = msg; t.classList.add('show'); clearTimeout(toast._t); toast._t=setTimeout(function(){ t.classList.remove('show'); }, 1400); }
+
+    function collectNearest(){
+      let nearest=null, nd=Infinity;
+      for (let i=0;i<memories.length;i++){
+        const m = memories[i];
+        if (m.userData.collected) continue;
+        const d = player.position.distanceTo(m.position);
+        if (d < nd){ nd = d; nearest = m; }
+      }
+      if (nearest && nd < 2.2){ nearest.userData.collected = true; nearest.visible=false;
+        const got = memories.filter(m=>m.userData.collected).length;
+        document.getElementById('count').textContent = got;
+        document.getElementById('bar').style.width = (got/memories.length*100)+"%";
+        toast(got===memories.length ? 'All memories restored' : 'Memory collected');
+      } else { toast('Move closer and press E'); }
+    }
+
+    window.addEventListener('keydown', (e)=>{ const k=e.key.toLowerCase(); keys[k]=true; if (['w','a','s','d','arrowup','arrowdown','arrowleft','arrowright',' '].includes(k)) e.preventDefault(); if (k==='e') collectNearest(); });
+    window.addEventListener('keyup', (e)=>{ keys[e.key.toLowerCase()] = false; });
+
+    // orbit drag & double-tap reset & pinch handling
+    let dragging=false, lastX=0, lastY=0;
+    let lastTap=0;
+    renderer.domElement.addEventListener('pointerdown',(ev)=>{
+      if (ev.pointerType === 'touch' && ev.isPrimary && ev.detail === 2){ // double/tap fallback
+        const now = performance.now();
+        if (now - lastTap < 350){ resetCamera(); }
+        lastTap = now;
+      }
+      dragging = true; lastX = ev.clientX; lastY = ev.clientY;
+      renderer.domElement.setPointerCapture?.(ev.pointerId);
+    });
+    window.addEventListener('pointermove',(ev)=>{
+      if (!dragging) return;
+      const dx = ev.clientX - lastX, dy = ev.clientY - lastY;
+      yawTarget -= dx * 0.006; pitchTarget = THREE.MathUtils.clamp(pitchTarget + dy * 0.004, -0.25, 1.3);
+      lastX = ev.clientX; lastY = ev.clientY;
+    });
+    window.addEventListener('pointerup',()=>{ dragging = false; });
+
+    // pinch zoom support (touch)
+    let touches = new Map(), lastPinch = 0;
+    renderer.domElement.addEventListener('touchstart', (e)=>{
+      for(const t of e.changedTouches) touches.set(t.identifier, {x:t.clientX, y:t.clientY});
+      if (touches.size === 2){
+        const a = [...touches.values()]; lastPinch = Math.hypot(a[0].x-a[1].x, a[0].y-a[1].y);
+      }
+    }, {passive:true});
+    renderer.domElement.addEventListener('touchmove', (e)=>{
+      if (touches.size === 2){
+        for(const t of e.changedTouches) if (touches.has(t.identifier)) touches.set(t.identifier, {x:t.clientX, y:t.clientY});
+        const a = [...touches.values()];
+        if (a.length>=2){
+          const d = Math.hypot(a[0].x-a[1].x, a[0].y-a[1].y);
+          if (lastPinch) { distTarget = THREE.MathUtils.clamp(distTarget + (lastPinch - d) * 0.02, 3, 22); }
+          lastPinch = d;
+        }
+      }
+    }, {passive:true});
+    renderer.domElement.addEventListener('touchend', (e)=>{ for(const t of e.changedTouches) touches.delete(t.identifier); if (touches.size<2) lastPinch=0; }, {passive:true});
+
+    // wheel zoom
+    renderer.domElement.addEventListener('wheel', (e)=>{ e.preventDefault(); distTarget = THREE.MathUtils.clamp(distTarget + e.deltaY * 0.01, 3, 22); }, {passive:false});
+
+    // click-to-walk
+    renderer.domElement.addEventListener('click',(e)=>{
+      const rect = renderer.domElement.getBoundingClientRect();
+      const ndc = new THREE.Vector2(( (e.clientX-rect.left)/rect.width )*2 - 1, -((e.clientY-rect.top)/rect.height)*2 + 1);
+      const ray = new THREE.Raycaster();
+      ray.setFromCamera(ndc, camera);
+      const plane = new THREE.Plane(new THREE.Vector3(0,1,0), 0);
+      const hit = new THREE.Vector3();
+      if (ray.ray.intersectPlane(plane, hit)){ autoTarget = hit.clone(); autoTarget.y = terrainHeight(autoTarget.x, autoTarget.z); }
+    });
+
+    // zoom buttons
+    document.getElementById('zoomIn').onclick = ()=> { distTarget = Math.max(3, distTarget - 1.6); };
+    document.getElementById('zoomOut').onclick = ()=> { distTarget = Math.min(22, distTarget + 1.6); };
+    document.getElementById('resetCam').onclick = resetCamera;
+    function resetCamera(){ yawTarget = 0; pitchTarget = 0.35; distTarget = 6.5; toast('Camera reset'); }
+
+    // Mobile joystick
+    const pad = document.getElementById('movePad'), stick = document.getElementById('moveStick');
+    let padActive=false, padId=null, vX=0, vZ=0;
+    function setStick(x,z){ vX = x; vZ = z; stick.style.transform = `translate(${x*26}px,${z*26}px)`; }
+    function padMove(e){
+      const r = pad.getBoundingClientRect(); const cx = r.left + r.width/2, cy = r.top + r.height/2;
+      let x = (e.clientX - cx)/(r.width*0.34), z = (e.clientY - cy)/(r.height*0.34);
+      const d = Math.hypot(x,z); if (d>1){ x/=d; z/=d; } setStick(x,z);
+    }
+    pad.addEventListener('pointerdown', (e)=>{ padActive=true; padId=e.pointerId; pad.setPointerCapture?.(e.pointerId); padMove(e); });
+    pad.addEventListener('pointermove', (e)=>{ if (padActive && e.pointerId===padId) padMove(e); });
+    function padEnd(){ padActive=false; padId=null; setStick(0,0); }
+    pad.addEventListener('pointerup', padEnd); pad.addEventListener('pointercancel', padEnd);
+
+    // simple walk animation + head-look
+    function animateAvatar(dirX, dirZ, moving){
+      // swing legs/arms
+      const time = performance.now() * 0.006;
+      const speed = moving ? 1.0 : 0.25;
+      const swing = Math.sin(time * 8 * speed) * (moving?0.9:0.08);
+
+      leftArm.rotation.x = -0.6 + swing * 0.5;
+      rightArm.rotation.x = 0.6 - swing * 0.5;
+      leftLeg.rotation.x = -0.65 - swing * 0.6;
+      rightLeg.rotation.x = 0.65 + swing * 0.6;
+
+      // head look toward movement direction slightly
+      const headYaw = Math.atan2(dirX || 0, dirZ || 1) * 0.5;
+      headRig.rotation.y += (headYaw - headRig.rotation.y) * 0.08;
+    }
+
+    // main loop
+    function animate(){
+      requestAnimationFrame(animate);
+
+      // gather input
+      let ix = 0, iz = 0;
+      if (keys['w']||keys['arrowup']) iz -= 1;
+      if (keys['s']||keys['arrowdown']) iz += 1;
+      if (keys['a']||keys['arrowleft']) ix -= 1;
+      if (keys['d']||keys['arrowright']) ix += 1;
+      // joystick contribution
+      if (Math.hypot(vX, vZ) > 0.02){ ix += vX; iz += vZ; }
+
+      let moving = false;
+      let dirX = 0, dirZ = 1;
+
+      if (!autoTarget && Math.hypot(ix,iz) < 0.12){
+        // idle
+      } else if (autoTarget && Math.hypot(ix,iz) < 0.12){
+        const dx = autoTarget.x - player.position.x, dz = autoTarget.z - player.position.z;
+        const d = Math.hypot(dx,dz);
+        if (d < 0.35){ autoTarget = null; }
+        else { ix = dx / d; iz = dz / d; }
+      }
+
+      if (Math.hypot(ix,iz) > 0.12){
+        moving = true;
+        const len = Math.hypot(ix,iz); ix /= len; iz /= len;
+        dirX = ix; dirZ = iz;
+
+        // world-space direction relative to yaw
+        const forwardX = -Math.sin(yawTarget), forwardZ = -Math.cos(yawTarget);
+        const rightX = Math.cos(yawTarget), rightZ = -Math.sin(yawTarget);
+        const wx = rightX * ix + forwardX * -iz;
+        const wz = rightZ * ix + forwardZ * -iz;
+
+        const speed = 5.2;
+        player.position.x += wx * speed * 0.016;
+        player.position.z += wz * speed * 0.016;
+        player.position.y = terrainHeight(player.position.x, player.position.z) + 0.2;
+        player.rotation.y = Math.atan2(wx, wz);
+      } else {
+        player.position.y = terrainHeight(player.position.x, player.position.z) + 0.2;
+      }
+
+      // avatar animation
+      animateAvatar(dirX, dirZ, moving);
+
+      // animate crystals
+      const t = performance.now()*0.001;
+      for (let i=0;i<memories.length;i++){
+        const m = memories[i];
+        if (!m.userData.collected){
+          m.position.y = terrainHeight(m.position.x,m.position.z) + 1.15 + Math.sin(t*1.8 + i)*0.14;
+          m.rotation.y += 0.02;
+        }
+      }
+
+      // portal subtle motion
+      portal.rotation.z += 0.008;
+
+      // camera smoothing update
+      target.set(player.position.x, player.position.y + 1.12, player.position.z);
+      updateCamera();
+      renderer.render(scene, camera);
+    }
+
+    // initial camera targets
+    let yawTarget = 0, pitchTarget = 0.35, distTarget = 6.5;
+    function updateCamera(){
+      yaw += (yawTarget - yaw) * 0.12;
+      pitch += (pitchTarget - pitch) * 0.12;
+      camDist += (distTarget - camDist) * 0.12;
+
+      const cp = Math.max(-0.05, Math.min(1.2, pitch));
+      const offset = new THREE.Vector3(Math.sin(yaw)*Math.cos(cp)*camDist, Math.sin(cp)*camDist + 1.2, Math.cos(yaw)*Math.cos(cp)*camDist);
+      camera.position.copy(target).add(offset);
+      camera.lookAt(target);
+    }
+
+    // reset camera helper already defined
+    function resetCamera(){ yawTarget = 0; pitchTarget = 0.35; distTarget = 6.5; toast('Camera reset'); }
+    document.getElementById('resetCam').onclick = resetCamera;
+
+    // finalize: expose collectNearest on double-tap if desired (optional)
+    renderer.domElement.addEventListener('dblclick', ()=>resetCamera());
+
+    // start
+    animate();
+    debug('Ready. Drag to orbit 360°, pinch or wheel to zoom. If you want a real character model, say "Add GLTF avatar".');
+
+    // capture global errors (surface them)
+    window.addEventListener('error', (ev)=>{ debug('JS error: '+(ev.message||'unknown')); console.error(ev.error||ev.message); });
+    window.addEventListener('unhandledrejection', (ev)=>{ debug('Unhandled rejection: '+String(ev.reason)); console.error(ev); });
+
+  })();
+  </script>
+</body>
+</html>
